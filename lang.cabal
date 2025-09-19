@@ -1,0 +1,8 @@
+cabal-version: 3.0
+name: lang
+version: 0.1.0.0
+build-type: Simple
+
+executable lang
+    main-is: main.hs
+    build-depends: base ^>=4.20.0.0, split
