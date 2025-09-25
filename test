@@ -1,2 +1,2 @@
-(factorial (+ 5 3))
-(the quick brown (fox 4))
+(+ 5 3)
+(+ (- 9 2) 4)
