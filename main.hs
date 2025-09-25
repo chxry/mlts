@@ -7,8 +7,8 @@ import qualified Data.Map as Map
 type Context = Map.Map String Value
 
 main :: IO ()
--- main = loadFile "test"
-main = repl Map.empty
+main = loadFile "test"
+-- main = repl Map.empty
 
 repl :: Context -> IO ()
 repl ctx = do
@@ -36,25 +36,29 @@ runInput ctx x = do
   putStrLn ("eval:\n  " ++ intercalate "\n  " (fmap show (snd out)))
   return (fst out)
 
-data Token = TInt Integer | TLabel String | Define | OpenParen | CloseParen
+data Token = TInt Integer | TLabel String | Define | Lambda| OpenParen | CloseParen
   deriving (Eq, Show)
 
 readToken :: String -> Token
 readToken "(" = OpenParen
 readToken ")" = CloseParen
 readToken "define" = Define
+readToken "lambda" = Lambda
 readToken str | isDigit (head str) = TInt (read str)
               | otherwise = TLabel str
 
 tokenize :: String -> [Token]
 tokenize str = fmap readToken (concatMap words (split (oneOf "()") str))
 
-data Expr = EInt Integer | ELabel String | ESExpr [Expr]
+data Expr = EInt Integer | ELabel String | ESExpr [Expr] | ELambda String Expr
   deriving (Show)
 
 parseExpr :: [Token] -> (Expr, [Token])
 parseExpr (TInt x:xs) = (EInt x, xs)
 parseExpr (TLabel x:xs) = (ELabel x, xs)
+parseExpr (OpenParen:Lambda:TLabel b:xs) =
+  let (expr, CloseParen:rest) = parseExpr xs
+  in (ELambda b expr, rest)
 parseExpr (OpenParen:xs) =
   let (sexp, rest) = parseSExpr xs
   in (ESExpr sexp, rest)
@@ -70,14 +74,15 @@ printExpr :: Expr -> String
 printExpr (EInt x) = show x;
 printExpr (ELabel x) = x;
 printExpr (ESExpr xs) = "(" ++ intercalate " " (fmap printExpr xs) ++ ")"
+printExpr (ELambda b x) = "(lambda " ++ b ++ " " ++ printExpr x ++ ")"
 
 data Stmt = SExpr Expr | SDefine String Expr
   deriving (Show)
 
 parseStmt :: [Token] -> (Stmt, [Token])
 parseStmt (OpenParen:Define:TLabel l:xs) =
-  let (expr, rest) = parseExpr xs
-  in (SDefine l expr, tail rest)
+  let (expr, CloseParen:rest) = parseExpr xs
+  in (SDefine l expr, rest)
 
 parseStmt xs =
   let (expr, rest) = parseExpr xs
@@ -93,9 +98,9 @@ printStmt :: Stmt -> String
 printStmt (SExpr x) = printExpr x
 printStmt (SDefine l x) = "(define " ++ l ++ " " ++ printExpr x ++ ")"
 
-data Prim = Add | Sub | Mul | Div | Pow | Mod | Eq | Ne | Gt | Ge | Lt | Le | And | Or
+data Prim = Add | Sub | Mul | Div | Pow | Mod | Eq | Ne | Gt | Ge | Lt | Le | And | Or | ModMulInv | Lcm
   deriving (Show)
-data Value = VInt Integer | VBool Bool | VPrim Prim
+data Value = VInt Integer | VBool Bool | VPrim Prim | VLambda String Expr
   deriving (Show)
 
 evalStmt :: Context -> Stmt -> (Context, Maybe Value)
@@ -120,25 +125,43 @@ eval c (ELabel "<") = VPrim Lt
 eval c (ELabel "<=") = VPrim Le
 eval c (ELabel "and") = VPrim And
 eval c (ELabel "or") = VPrim Or
+eval c (ELabel "modmul-inv") = VPrim ModMulInv
+eval c (ELabel "lcm") = VPrim Lcm
 eval c (ELabel x) = c Map.! x
-eval c (ESExpr (x:xs)) = apply (eval c x) (fmap (eval c) xs)
+eval c (ESExpr (x:xs)) = apply c (eval c x) (fmap (eval c) xs)
+eval c (ELambda b x) = VLambda b x
 
-apply :: Value -> [Value] -> Value
-apply (VPrim Add) [VInt a, VInt b] = VInt (a + b)
-apply (VPrim Sub) [VInt a, VInt b] = VInt (a - b)
-apply (VPrim Mul) [VInt a, VInt b] = VInt (a * b)
-apply (VPrim Div) [VInt a, VInt b] = VInt (div a b)
-apply (VPrim Pow) [VInt a, VInt b] = VInt (a ^ b)
-apply (VPrim Mod) [VInt a, VInt b] = VInt (mod a b)
+apply :: Context -> Value -> [Value] -> Value
+apply c (VPrim Add) [VInt a, VInt b] = VInt (a + b)
+apply c (VPrim Sub) [VInt a, VInt b] = VInt (a - b)
+apply c (VPrim Mul) [VInt a, VInt b] = VInt (a * b)
+apply c (VPrim Div) [VInt a, VInt b] = VInt (div a b)
+apply c (VPrim Pow) [VInt a, VInt b] = VInt (a ^ b)
+apply c (VPrim Mod) [VInt a, VInt b] = VInt (mod a b)
+apply c (VPrim ModMulInv) [VInt a, VInt b] = VInt (modmulInv a b)
+apply c (VPrim Lcm) [VInt a, VInt b] = VInt (lcm a b)
 
-apply (VPrim Eq) [VInt a, VInt b] = VBool (a == b)
-apply (VPrim Ne) [VInt a, VInt b] = VBool (a /= b)
-apply (VPrim Gt) [VInt a, VInt b] = VBool (a > b)
-apply (VPrim Ge) [VInt a, VInt b] = VBool (a >= b)
-apply (VPrim Lt) [VInt a, VInt b] = VBool (a < b)
-apply (VPrim Le) [VInt a, VInt b] = VBool (a <= b)
+apply c (VPrim Eq) [VInt a, VInt b] = VBool (a == b)
+apply c (VPrim Ne) [VInt a, VInt b] = VBool (a /= b)
+apply c (VPrim Gt) [VInt a, VInt b] = VBool (a > b)
+apply c (VPrim Ge) [VInt a, VInt b] = VBool (a >= b)
+apply c (VPrim Lt) [VInt a, VInt b] = VBool (a < b)
+apply c (VPrim Le) [VInt a, VInt b] = VBool (a <= b)
 
-apply (VPrim And) [VBool a, VBool b] = VBool (a && b)
-apply (VPrim Or) [VBool a, VBool b] = VBool (a || b)
+apply c (VPrim And) [VBool a, VBool b] = VBool (a && b)
+apply c (VPrim Or) [VBool a, VBool b] = VBool (a || b)
 
-apply x _ = error ("invalid operation " ++ show x)
+apply c (VLambda b x) [expr] = eval (Map.insert b expr c) x
+apply c x _ = error ("invalid operation " ++ show x)
+
+egcd :: Integer -> Integer -> (Integer, Integer, Integer)
+egcd a 0 = (a, 1, 0)
+egcd a b =
+  let (g, x, y) = egcd b (a `mod` b)
+  in (g, y, x - (a `div` b) * y)
+
+modmulInv :: Integer -> Integer -> Integer
+modmulInv a m =
+  let (g, x, _) = egcd a m
+  in mod x m
+
