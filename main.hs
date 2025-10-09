@@ -29,14 +29,15 @@ runInput :: Context -> String -> IO Context
 runInput ctx x = do
   let lexed = tokenize x
   let parsed = parseProgram lexed
-  let out = mapAccumL evalStmt ctx parsed
-  putStrLn ("lexed: " ++ show lexed)
-  putStrLn ("parsed: " ++ show parsed)
-  putStrLn ("formatted:\n  " ++ intercalate "\n  " (fmap printStmt parsed))
-  putStrLn ("eval:\n  " ++ intercalate "\n  " (fmap show (snd out)))
-  return (fst out)
+  let (newCtx, vals) = mapAccumL evalStmt ctx parsed
+  -- putStrLn ("lexed: " ++ show lexed)
+  -- putStrLn ("parsed: " ++ show parsed)
+  -- putStrLn ("formatted:\n  " ++ intercalate "\n  " (map printStmt parsed))
+  -- putStrLn ("eval:\n  " ++ intercalate "\n  " (map show vals))
+  putStrLn (intercalate "\n" (map printValue vals))
+  return newCtx
 
-data Token = TInt Integer | TLabel String | Define | Lambda| OpenParen | CloseParen
+data Token = TInt Integer | TLabel String | Define | Lambda | OpenParen | CloseParen
   deriving (Eq, Show)
 
 readToken :: String -> Token
@@ -48,7 +49,7 @@ readToken str | isDigit (head str) = TInt (read str)
               | otherwise = TLabel str
 
 tokenize :: String -> [Token]
-tokenize str = fmap readToken (concatMap words (split (oneOf "()") str))
+tokenize str = map readToken (concatMap words (split (oneOf "()") str))
 
 data Expr = EInt Integer | ELabel String | ESExpr [Expr] | ELambda String Expr
   deriving (Show)
@@ -73,7 +74,7 @@ parseSExpr xs =
 printExpr :: Expr -> String
 printExpr (EInt x) = show x;
 printExpr (ELabel x) = x;
-printExpr (ESExpr xs) = "(" ++ intercalate " " (fmap printExpr xs) ++ ")"
+printExpr (ESExpr xs) = "(" ++ intercalate " " (map printExpr xs) ++ ")"
 printExpr (ELambda b x) = "(lambda " ++ b ++ " " ++ printExpr x ++ ")"
 
 data Stmt = SExpr Expr | SDefine String Expr
@@ -98,67 +99,59 @@ printStmt :: Stmt -> String
 printStmt (SExpr x) = printExpr x
 printStmt (SDefine l x) = "(define " ++ l ++ " " ++ printExpr x ++ ")"
 
-data Prim = Add | Sub | Mul | Div | Pow | Mod | Eq | Ne | Gt | Ge | Lt | Le | And | Or | ModMulInv | Lcm
-  deriving (Show)
-data Value = VInt Integer | VBool Bool | VPrim Prim | VLambda String Expr
+data Value = VInt Integer | VBool Bool | VClosure String Expr Context
   deriving (Show)
 
-evalStmt :: Context -> Stmt -> (Context, Maybe Value)
-evalStmt c (SExpr x) = (c, Just (eval c x))
-evalStmt c (SDefine l x) = (Map.insert l (eval c x) c, Nothing)
+printValue :: Value -> String
+printValue (VInt x) = show x
+printValue (VBool True) = "true"
+printValue (VBool False) = "false"
+printValue (VClosure b x _) = printExpr (ELambda b x)
+
+evalStmt :: Context -> Stmt -> (Context, Value)
+evalStmt c (SExpr x) = (c, eval c x)
+evalStmt c (SDefine l x) =
+  let val = eval c x
+  in (Map.insert l val c, val)
 
 eval :: Context -> Expr -> Value
 eval c (EInt x) = VInt x
 eval c (ELabel "true") = VBool True
 eval c (ELabel "false") = VBool False
-eval c (ELabel "+") = VPrim Add
-eval c (ELabel "-") = VPrim Sub
-eval c (ELabel "*") = VPrim Mul
-eval c (ELabel "/") = VPrim Div
-eval c (ELabel "pow") = VPrim Pow
-eval c (ELabel "mod") = VPrim Mod
-eval c (ELabel "==") = VPrim Eq
-eval c (ELabel "!=") = VPrim Ne
-eval c (ELabel ">") = VPrim Gt
-eval c (ELabel ">=") = VPrim Ge
-eval c (ELabel "<") = VPrim Lt
-eval c (ELabel "<=") = VPrim Le
-eval c (ELabel "and") = VPrim And
-eval c (ELabel "or") = VPrim Or
-eval c (ELabel "modmul-inv") = VPrim ModMulInv
-eval c (ELabel "lcm") = VPrim Lcm
 eval c (ELabel x) = c Map.! x
-eval c (ESExpr (x:xs)) = apply c (eval c x) (fmap (eval c) xs)
-eval c (ELambda b x) = VLambda b x
+eval c (ESExpr (x:xs)) = apply c x (map (eval c) xs)
+eval c (ELambda b x) = VClosure b x c
 
-apply :: Context -> Value -> [Value] -> Value
-apply c (VPrim Add) [VInt a, VInt b] = VInt (a + b)
-apply c (VPrim Sub) [VInt a, VInt b] = VInt (a - b)
-apply c (VPrim Mul) [VInt a, VInt b] = VInt (a * b)
-apply c (VPrim Div) [VInt a, VInt b] = VInt (div a b)
-apply c (VPrim Pow) [VInt a, VInt b] = VInt (a ^ b)
-apply c (VPrim Mod) [VInt a, VInt b] = VInt (mod a b)
-apply c (VPrim ModMulInv) [VInt a, VInt b] = VInt (modmulInv a b)
-apply c (VPrim Lcm) [VInt a, VInt b] = VInt (lcm a b)
+apply :: Context -> Expr -> [Value] -> Value
+apply c (ELabel "+") [VInt a, VInt b] = VInt (a + b)
+apply c (ELabel "-") [VInt a, VInt b] = VInt (a - b)
+apply c (ELabel "*") [VInt a, VInt b] = VInt (a * b)
+apply c (ELabel "/") [VInt a, VInt b] = VInt (div a b)
+apply c (ELabel "pow") [VInt a, VInt b] = VInt (a ^ b)
+apply c (ELabel "mod") [VInt a, VInt b] = VInt (mod a b)
+apply c (ELabel "modmul-inv") [VInt a, VInt b] = VInt (modmulInv a b)
+apply c (ELabel "lcm") [VInt a, VInt b] = VInt (lcm a b)
 
-apply c (VPrim Eq) [VInt a, VInt b] = VBool (a == b)
-apply c (VPrim Ne) [VInt a, VInt b] = VBool (a /= b)
-apply c (VPrim Gt) [VInt a, VInt b] = VBool (a > b)
-apply c (VPrim Ge) [VInt a, VInt b] = VBool (a >= b)
-apply c (VPrim Lt) [VInt a, VInt b] = VBool (a < b)
-apply c (VPrim Le) [VInt a, VInt b] = VBool (a <= b)
+apply c (ELabel "==") [VInt a, VInt b] = VBool (a == b)
+apply c (ELabel "!=") [VInt a, VInt b] = VBool (a /= b)
+apply c (ELabel ">") [VInt a, VInt b] = VBool (a > b)
+apply c (ELabel ">=") [VInt a, VInt b] = VBool (a >= b)
+apply c (ELabel "<") [VInt a, VInt b] = VBool (a < b)
+apply c (ELabel "<=") [VInt a, VInt b] = VBool (a <= b)
 
-apply c (VPrim And) [VBool a, VBool b] = VBool (a && b)
-apply c (VPrim Or) [VBool a, VBool b] = VBool (a || b)
-
-apply c (VLambda b x) [expr] = eval (Map.insert b expr c) x
+apply c (ELabel "and") [VBool a, VBool b] = VBool (a && b)
+apply c (ELabel "or") [VBool a, VBool b] = VBool (a || b)
+apply c (ELabel "if") [VBool x, a, b] = if x then a else b
+apply c l [expr] =
+  let (VClosure b x newC) = eval c l
+  in eval (Map.insert b expr newC) x
 apply c x _ = error ("invalid operation " ++ show x)
 
 egcd :: Integer -> Integer -> (Integer, Integer, Integer)
 egcd a 0 = (a, 1, 0)
 egcd a b =
-  let (g, x, y) = egcd b (a `mod` b)
-  in (g, y, x - (a `div` b) * y)
+  let (g, x, y) = egcd b (mod a b)
+  in (g, y, x - (div a b) * y)
 
 modmulInv :: Integer -> Integer -> Integer
 modmulInv a m =
