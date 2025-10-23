@@ -23,3 +23,5 @@
 
 (define fibonacci (Y (lambda f (lambda n (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))))
 (fibonacci 20)
+
+(map (lambda x (* x 2)) (list 1 2 3 4 5 6))
