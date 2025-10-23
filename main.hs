@@ -8,7 +8,7 @@ type Context = Map.Map String Value
 
 main :: IO ()
 main = loadFile "test"
--- main = repl Map.empty
+-- main = repl defaultContext
 
 repl :: Context -> IO ()
 repl c = do
@@ -20,9 +20,8 @@ repl c = do
 
 loadFile :: String -> IO ()
 loadFile x = do
-  handle <- openFile x ReadMode
-  input <- hGetContents handle
-  runInput Map.empty input
+  input <- readFile x
+  runInput defaultContext input
   return ()
 
 runInput :: Context -> String -> IO Context
@@ -76,8 +75,7 @@ parseProgram tokens =
   let (expr, rest) = parseExpr tokens
   in expr:parseProgram rest
 
-data Value = VInt Integer | VBool Bool | VList [Value] | VClosure String Expr Context
-  deriving (Show)
+data Value = VInt Integer | VBool Bool | VList [Value] | VClosure String Expr Context | VPrim (Value -> Value)
 
 printValue :: Value -> String
 printValue (VInt x) = show x
@@ -85,6 +83,7 @@ printValue (VBool True) = "true"
 printValue (VBool False) = "false"
 printValue (VList xs) = "(" ++ unwords (map printValue xs)++ ")"
 printValue (VClosure b x _) = "(lambda " ++ b ++ " " ++ printExpr x ++ ")"
+printValue (VPrim _) = "<primitive>"
 
 evalStmt :: Context -> Expr -> (Context, Value)
 evalStmt c (ESExpr [ELabel "define", ELabel l, x]) =
@@ -96,49 +95,43 @@ eval :: Context -> Expr -> Value
 eval c (EInt x) = VInt x
 eval c (ELabel "true") = VBool True
 eval c (ELabel "false") = VBool False
-eval c (ELabel x) = c Map.! x
+eval c (ELabel x) =
+  case Map.lookup x c of
+    Just v -> v
+    Nothing -> error ("unknown var " ++ x)
 eval c (ESExpr ([ELabel "lambda", ELabel b, x])) = VClosure b x c
-eval c (ESExpr (x:xs)) = apply c x (map (eval c) xs)
+eval c (ESExpr (ELabel "list":xs)) = VList (map (eval c) xs)
+eval c (ESExpr (f:xs)) = foldl (\g x -> apply g (eval c x)) (eval c f) xs
 
--- todo: make these all closures, and curried. then move logic up to eval
-apply :: Context -> Expr -> [Value] -> Value
-apply c (ELabel "+") [VInt a, VInt b] = VInt (a + b)
-apply c (ELabel "-") [VInt a, VInt b] = VInt (a - b)
-apply c (ELabel "*") [VInt a, VInt b] = VInt (a * b)
-apply c (ELabel "/") [VInt a, VInt b] = VInt (div a b)
-apply c (ELabel "pow") [VInt a, VInt b] = VInt (a ^ b)
-apply c (ELabel "mod") [VInt a, VInt b] = VInt (mod a b)
-apply c (ELabel "modmul-inv") [VInt a, VInt b] = VInt (modmulInv a b)
-apply c (ELabel "lcm") [VInt a, VInt b] = VInt (lcm a b)
+apply :: Value -> Value -> Value
+apply (VClosure b body c') arg = eval (Map.insert b arg c') body
+apply (VPrim f) arg = f arg
+apply f _ = error ("cannot apply " ++ printValue f)
 
-apply c (ELabel "==") [VInt a, VInt b] = VBool (a == b)
-apply c (ELabel "!=") [VInt a, VInt b] = VBool (a /= b)
-apply c (ELabel ">") [VInt a, VInt b] = VBool (a > b)
-apply c (ELabel ">=") [VInt a, VInt b] = VBool (a >= b)
-apply c (ELabel "<") [VInt a, VInt b] = VBool (a < b)
-apply c (ELabel "<=") [VInt a, VInt b] = VBool (a <= b)
+prim2 :: (Value -> Value -> Value) -> Value
+prim2 f = VPrim (\a -> VPrim (\b -> f a b))
 
-apply c (ELabel "and") [VBool a, VBool b] = VBool (a && b)
-apply c (ELabel "or") [VBool a, VBool b] = VBool (a || b)
-apply c (ELabel "if") [VBool x, a, b] = if x then a else b
+prim3 :: (Value -> Value -> Value -> Value) -> Value
+prim3 f = VPrim (\a -> VPrim (\b -> VPrim (\c -> f a b c)))
 
-apply c (ELabel "list") xs = VList xs
-apply c (ELabel "map") [v@(VClosure _ _ _), VList xs] = VList (map (applyClosure v) xs)
+defaultContext :: Context
+defaultContext = Map.fromList [
+  ("+", prim2 (\(VInt a) (VInt b) -> VInt (a + b))),
+  ("-", prim2 (\(VInt a) (VInt b) -> VInt (a - b))),
+  ("*", prim2 (\(VInt a) (VInt b) -> VInt (a * b))),
+  ("/", prim2 (\(VInt a) (VInt b) -> VInt (div a b))),
+  ("pow", prim2 (\(VInt a) (VInt b) -> VInt (a ^ b))),
+  ("mod", prim2 (\(VInt a) (VInt b) -> VInt (mod a b))),
+  
+  ("==", prim2 (\(VInt a) (VInt b) -> VBool (a == b))),
+  ("!=", prim2 (\(VInt a) (VInt b) -> VBool (a /= b))),
+  (">", prim2 (\(VInt a) (VInt b) -> VBool (a > b))),
+  (">=", prim2 (\(VInt a) (VInt b) -> VBool (a >= b))),
+  ("<", prim2 (\(VInt a) (VInt b) -> VBool (a < b))),
+  ("<=", prim2 (\(VInt a) (VInt b) -> VBool (a <= b))),
 
-apply c f [x] = applyClosure (eval c f) x
-apply c f _ = error ("invalid operation " ++ show f)
+  ("and", prim2 (\(VBool a) (VBool b) -> VBool (a && b))),
+  ("or", prim2 (\(VBool a) (VBool b) -> VBool (a || b))),
+  ("if", prim3 (\(VBool x) a b -> if x then a else b)),
 
-applyClosure :: Value -> Value -> Value
-applyClosure (VClosure b x c) v = eval (Map.insert b v c) x
-
-egcd :: Integer -> Integer -> (Integer, Integer, Integer)
-egcd a 0 = (a, 1, 0)
-egcd a b =
-  let (g, x, y) = egcd b (mod a b)
-  in (g, y, x - (div a b) * y)
-
-modmulInv :: Integer -> Integer -> Integer
-modmulInv a m =
-  let (g, x, _) = egcd a m
-  in mod x m
-
+  ("map", prim2 (\f (VList xs) -> VList (map (apply f) xs)))]
