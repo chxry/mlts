@@ -11,12 +11,12 @@ main = loadFile "test"
 -- main = repl Map.empty
 
 repl :: Context -> IO ()
-repl ctx = do
+repl c = do
   putStr "> "
   hFlush stdout
   input <- getLine
-  ctx2 <- runInput ctx input
-  repl ctx2
+  c' <- runInput c input
+  repl c'
 
 loadFile :: String -> IO ()
 loadFile x = do
@@ -26,24 +26,23 @@ loadFile x = do
   return ()
 
 runInput :: Context -> String -> IO Context
-runInput ctx x = do
+runInput c x = do
   let lexed = tokenize x
   let parsed = parseProgram lexed
-  let (newCtx, vals) = mapAccumL evalStmt ctx parsed
+  let (c', vals) = mapAccumL evalStmt c parsed
   -- putStrLn ("lexed: " ++ show lexed)
   -- putStrLn ("parsed: " ++ show parsed)
   -- putStrLn ("formatted:\n  " ++ intercalate "\n  " (map printStmt parsed))
   -- putStrLn ("eval:\n  " ++ intercalate "\n  " (map show vals))
   putStrLn (intercalate "\n" (map printValue vals))
-  return newCtx
+  return c'
 
-data Token = TInt Integer | TLabel String | Define | Lambda | OpenParen | CloseParen
+data Token = TInt Integer | TLabel String | Lambda | OpenParen | CloseParen
   deriving (Eq, Show)
 
 readToken :: String -> Token
 readToken "(" = OpenParen
 readToken ")" = CloseParen
-readToken "define" = Define
 readToken "lambda" = Lambda
 readToken str | isDigit (head str) = TInt (read str)
               | otherwise = TLabel str
@@ -68,8 +67,8 @@ parseSExpr :: [Token] -> ([Expr], [Token])
 parseSExpr (CloseParen:xs) = ([], xs)
 parseSExpr xs =
   let (expr, rest) = parseExpr xs
-      (sexp, rest2) = parseSExpr rest
-  in (expr:sexp, rest2)
+      (sexp, rest') = parseSExpr rest
+  in (expr:sexp, rest')
 
 printExpr :: Expr -> String
 printExpr (EInt x) = show x;
@@ -77,27 +76,11 @@ printExpr (ELabel x) = x;
 printExpr (ESExpr xs) = "(" ++ intercalate " " (map printExpr xs) ++ ")"
 printExpr (ELambda b x) = "(lambda " ++ b ++ " " ++ printExpr x ++ ")"
 
-data Stmt = SExpr Expr | SDefine String Expr
-  deriving (Show)
-
-parseStmt :: [Token] -> (Stmt, [Token])
-parseStmt (OpenParen:Define:TLabel l:xs) =
-  let (expr, CloseParen:rest) = parseExpr xs
-  in (SDefine l expr, rest)
-
-parseStmt xs =
-  let (expr, rest) = parseExpr xs
-  in (SExpr expr, rest)
-
-parseProgram :: [Token] -> [Stmt]
+parseProgram :: [Token] -> [Expr]
 parseProgram [] = []
 parseProgram tokens =
-  let (stmt, rest) = parseStmt tokens
-  in stmt:parseProgram rest
-
-printStmt :: Stmt -> String
-printStmt (SExpr x) = printExpr x
-printStmt (SDefine l x) = "(define " ++ l ++ " " ++ printExpr x ++ ")"
+  let (expr, rest) = parseExpr tokens
+  in expr:parseProgram rest
 
 data Value = VInt Integer | VBool Bool | VClosure String Expr Context
   deriving (Show)
@@ -108,11 +91,11 @@ printValue (VBool True) = "true"
 printValue (VBool False) = "false"
 printValue (VClosure b x _) = printExpr (ELambda b x)
 
-evalStmt :: Context -> Stmt -> (Context, Value)
-evalStmt c (SExpr x) = (c, eval c x)
-evalStmt c (SDefine l x) =
+evalStmt :: Context -> Expr -> (Context, Value)
+evalStmt c (ESExpr (ELabel "define":ELabel l:x:[])) =
   let val = eval c x
   in (Map.insert l val c, val)
+evalStmt c x = (c, eval c x)
 
 eval :: Context -> Expr -> Value
 eval c (EInt x) = VInt x
@@ -143,8 +126,8 @@ apply c (ELabel "and") [VBool a, VBool b] = VBool (a && b)
 apply c (ELabel "or") [VBool a, VBool b] = VBool (a || b)
 apply c (ELabel "if") [VBool x, a, b] = if x then a else b
 apply c l [expr] =
-  let (VClosure b x newC) = eval c l
-  in eval (Map.insert b expr newC) x
+  let (VClosure b x c') = eval c l
+  in eval (Map.insert b expr c') x
 apply c x _ = error ("invalid operation " ++ show x)
 
 egcd :: Integer -> Integer -> (Integer, Integer, Integer)

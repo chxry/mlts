@@ -12,11 +12,14 @@
 (define c (rsa-en m))
 (define m' (rsa-de c))
 
-(define addCurry (lambda x (lambda y (+ x y))))
-(define add1 (addCurry 1))
+(define add (lambda x (lambda y (+ x y))))
+(define add1 (add 1))
 (add1 41)
 
 (define Y (lambda f ((lambda x (f (x x))) (lambda x (f (x x))))))
 
 (define factorial (Y (lambda f (lambda n (if (== n 0) 1 (* n (f (- n 1))))))))
-(factorial 6)
+(factorial 600)
+
+(define fibonacci (Y (lambda f (lambda n (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))))
+(fibonacci 20)
