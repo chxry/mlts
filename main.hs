@@ -47,16 +47,29 @@ readToken str | isDigit (head str) = TInt (read str)
 tokenize :: String -> [Token]
 tokenize str = map readToken (concatMap words (split (oneOf "()") str))
 
-data Expr = EInt Integer | ELabel String | ESExpr [Expr]
+data Expr = EInt Integer | ELabel String | ESExpr [Expr] | ELambda [String] Expr
   deriving (Eq, Show)
+
+label :: Expr -> Maybe String
+label (ELabel x) = Just x
+label _ = Nothing
 
 parseExpr :: [Token] -> (Expr, [Token])
 parseExpr (TInt x:xs) = (EInt x, xs)
 parseExpr (TLabel x:xs) = (ELabel x, xs)
+parseExpr (OpenParen:TLabel "lambda":xs) =
+  let (paramExpr, rest) = parseExpr xs
+      (body, rest') = parseExpr rest
+  in case (paramExpr, rest') of
+    (ESExpr params, CloseParen:rest'') ->
+      case mapM label params of
+         Just ps -> (ELambda ps body, rest'')
+         Nothing -> error "invalid lambda parameters"
+    _ -> error "invalid lambda syntax"
 parseExpr (OpenParen:xs) =
-  let (sexp, rest) = parseSExpr xs
-  in (ESExpr sexp, rest)
-
+    let (exprs, rest) = parseSExpr xs
+    in (ESExpr exprs, rest)
+  
 parseSExpr :: [Token] -> ([Expr], [Token])
 parseSExpr (CloseParen:xs) = ([], xs)
 parseSExpr xs =
@@ -68,6 +81,7 @@ printExpr :: Expr -> String
 printExpr (EInt x) = show x;
 printExpr (ELabel x) = x;
 printExpr (ESExpr xs) = "(" ++ unwords (map printExpr xs) ++ ")"
+printExpr (ELambda ps x) = "(lambda (" ++ unwords ps ++ ") " ++ printExpr x ++ ")"
 
 parseProgram :: [Token] -> [Expr]
 parseProgram [] = []
@@ -82,7 +96,7 @@ printValue (VInt x) = show x
 printValue (VBool True) = "true"
 printValue (VBool False) = "false"
 printValue (VList xs) = "(" ++ unwords (map printValue xs)++ ")"
-printValue (VClosure b x _) = "(lambda " ++ b ++ " " ++ printExpr x ++ ")"
+printValue (VClosure p x _) = "(lambda " ++ p ++ " " ++ printExpr x ++ ")"
 printValue (VPrim _) = "<primitive>"
 
 evalStmt :: Context -> Expr -> (Context, Value)
@@ -93,18 +107,17 @@ evalStmt c x = (c, eval c x)
 
 eval :: Context -> Expr -> Value
 eval c (EInt x) = VInt x
-eval c (ELabel "true") = VBool True
-eval c (ELabel "false") = VBool False
 eval c (ELabel x) =
   case Map.lookup x c of
     Just v -> v
     Nothing -> error ("unknown var " ++ x)
-eval c (ESExpr ([ELabel "lambda", ELabel b, x])) = VClosure b x c
 eval c (ESExpr (ELabel "list":xs)) = VList (map (eval c) xs)
 eval c (ESExpr (f:xs)) = foldl (\g x -> apply g (eval c x)) (eval c f) xs
+eval c (ELambda [p] x) = VClosure p x c
+eval c (ELambda (p:ps) x) = VClosure p (ELambda ps x) c
 
 apply :: Value -> Value -> Value
-apply (VClosure b body c') arg = eval (Map.insert b arg c') body
+apply (VClosure p body c') arg = eval (Map.insert p arg c') body
 apply (VPrim f) arg = f arg
 apply f _ = error ("cannot apply " ++ printValue f)
 
@@ -116,6 +129,9 @@ prim3 f = VPrim (\a -> VPrim (\b -> VPrim (\c -> f a b c)))
 
 defaultContext :: Context
 defaultContext = Map.fromList [
+  ("true", VBool True),
+  ("false", VBool False),
+
   ("+", prim2 (\(VInt a) (VInt b) -> VInt (a + b))),
   ("-", prim2 (\(VInt a) (VInt b) -> VInt (a - b))),
   ("*", prim2 (\(VInt a) (VInt b) -> VInt (a * b))),

@@ -1,9 +1,11 @@
-(define Y (lambda f ((lambda x (f (x x))) (lambda x (f (x x))))))
+(define Y (lambda (f) ((lambda (x) (f (x x))) (lambda (x) (f (x x))))))
 
-(define factorial (Y (lambda f (lambda n (if (== n 0) 1 (* n (f (- n 1))))))))
+(define factorial (Y (lambda (f n) (if (== n 0) 1 (* n (f (- n 1)))))))
 (factorial 20)
 
-(define fibonacci (Y (lambda f (lambda n (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))))
+(define fibonacci (Y (lambda (f n) (if (< n 2) n (+ (f (- n 1)) (f (- n 2)))))))
 (fibonacci 20)
 
-(map (lambda x (* x 2)) (list 1 2 3 4 5 6))
+(map (lambda (x) (* x 2)) (list 1 2 3 4 5 6))
+
+((lambda (x y z) (* (+ x y) z)) 1 2 3)
