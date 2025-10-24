@@ -1,11 +1,35 @@
 (define Y (lambda (f) ((lambda (x) (f (x x))) (lambda (x) (f (x x))))))
 
-(define factorial (Y (lambda (f n) (if (== n 0) 1 (* n (f (- n 1)))))))
+(define empty (list))
+(define isEmpty (lambda (xs) (== xs empty)))
+(define length
+  (Y (lambda (f xs) (if (isEmpty xs) 0 (+ 1 (f (tail xs))))))
+)
+(define map
+  (Y (lambda (f g xs) (if (isEmpty xs) empty (cons (g (head xs)) (f g (tail xs))))))
+)
+(define filter
+  (Y (lambda (f g xs) (if (isEmpty xs) empty (if (g (head xs)) (cons (head xs) (f g (tail xs))) (f g (tail xs))))))
+)
+(define foldl
+  (Y (lambda (f g a xs) (if (isEmpty xs) a (f g (g a (head xs)) (tail xs)))))
+)
+
+(define sum (foldl + 0))
+(define product (foldl * 1))
+(define even (lambda (x) (== (mod x 2) 0)))
+
+(define factorial
+  (Y (lambda (f n) (if (== n 0) 1 (* n (f (- n 1))))))
+)
+(define fibonacci
+  (Y (lambda (f n) (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))
+)
+
+(define xs (list 1 2 3 4 5 6))
 (factorial 20)
-
-(define fibonacci (Y (lambda (f n) (if (< n 2) n (+ (f (- n 1)) (f (- n 2)))))))
 (fibonacci 20)
-
-(map (lambda (x) (* x 2)) (list 1 2 3 4 5 6))
-
-((lambda (x y z) (* (+ x y) z)) 1 2 3)
+(map (* 2) xs)
+(sum xs)
+(product xs)
+(filter even xs)

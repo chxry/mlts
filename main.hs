@@ -91,6 +91,12 @@ parseProgram tokens =
 
 data Value = VInt Integer | VBool Bool | VList [Value] | VClosure String Expr Context | VPrim (Value -> Value)
 
+instance Eq Value where
+  VInt a == VInt b = a == b
+  VBool a == VBool b = a == b
+  VList a == VList b = a == b
+  _ == _ = False
+
 printValue :: Value -> String
 printValue (VInt x) = show x
 printValue (VBool True) = "true"
@@ -139,8 +145,8 @@ defaultContext = Map.fromList [
   ("pow", prim2 (\(VInt a) (VInt b) -> VInt (a ^ b))),
   ("mod", prim2 (\(VInt a) (VInt b) -> VInt (mod a b))),
   
-  ("==", prim2 (\(VInt a) (VInt b) -> VBool (a == b))),
-  ("!=", prim2 (\(VInt a) (VInt b) -> VBool (a /= b))),
+  ("==", prim2 (\a b -> VBool (a == b))),
+  ("!=", prim2 (\a b -> VBool (a /= b))),
   (">", prim2 (\(VInt a) (VInt b) -> VBool (a > b))),
   (">=", prim2 (\(VInt a) (VInt b) -> VBool (a >= b))),
   ("<", prim2 (\(VInt a) (VInt b) -> VBool (a < b))),
@@ -148,6 +154,9 @@ defaultContext = Map.fromList [
 
   ("and", prim2 (\(VBool a) (VBool b) -> VBool (a && b))),
   ("or", prim2 (\(VBool a) (VBool b) -> VBool (a || b))),
+  ("not", VPrim (\(VBool x) -> VBool (not x))),
   ("if", prim3 (\(VBool x) a b -> if x then a else b)),
 
-  ("map", prim2 (\f (VList xs) -> VList (map (apply f) xs)))]
+  ("cons", prim2 (\x (VList xs) -> VList (x:xs))),
+  ("head", VPrim (\(VList (x:_)) -> x)),
+  ("tail", VPrim (\(VList (_:xs)) -> VList xs))]
